@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 *.nc
 data/vector_store.json
+data/*.parquet

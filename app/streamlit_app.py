@@ -15,6 +15,8 @@ from app.visualization import (
 from app.query_engine import QueryEngine
 from rag.pipeline import RAGPipeline
 from rag.vector_store import LocalVectorStore
+from database.runtime import load_postgres_tables
+from ingestion.erddap import fetch_erddap_csv
 
 
 st.set_page_config(
@@ -207,6 +209,18 @@ def render_page_header(title: str, subtitle: str, badge: str = "DEMO DATA MODE")
 @st.cache_data(show_spinner=False)
 def load_initial_data():
     return generate_demo_argo_data(num_floats=80, profiles_per_float=3)
+
+
+@st.cache_data(show_spinner=False)
+def load_runtime_data(data_mode: str):
+    if data_mode.lower() == "postgres":
+        return load_postgres_tables(), "REAL ARGO / POSTGRESQL"
+    if data_mode.lower() in {"erddap", "remote"}:
+        url = os.getenv("ERDDAP_URL")
+        if not url:
+            raise RuntimeError("ERDDAP_URL is required when DATA_MODE=erddap")
+        return fetch_erddap_csv(url)[0], "REAL ARGO / ERDDAP"
+    return load_initial_data(), "DEMO / SYNTHETIC"
 
 
 @st.cache_data(show_spinner=False)
@@ -482,7 +496,13 @@ def render_demo_page(floats_df: pd.DataFrame, meas_df: pd.DataFrame):
 def main():
     load_dotenv()
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-    floats_df, profiles_df, meas_df = load_initial_data()
+    data_mode = os.getenv("DATA_MODE", "demo")
+    try:
+        (floats_df, profiles_df, meas_df), source_label = load_runtime_data(data_mode)
+    except Exception as exc:
+        st.warning(f"PostgreSQL mode is unavailable, so FloatChat is using demo data: {exc}", icon="⚠️")
+        floats_df, profiles_df, meas_df = load_initial_data()
+        source_label = "DEMO / SYNTHETIC (FALLBACK)"
     engine = QueryEngine(floats_df, profiles_df, meas_df)
     rag = RAGPipeline(LocalVectorStore(os.getenv("VECTOR_STORE_PATH", "data/vector_store.json")))
     summary = build_summary(floats_df, profiles_df, meas_df)
@@ -729,6 +749,8 @@ def main():
         c1, c2 = st.columns(2)
         csv_data = explorer_df.to_csv(index=False).encode("utf-8")
         c1.download_button("📥 Export as CSV", data=csv_data, file_name="floatchat_argo_data.csv", mime="text/csv")
+        parquet_data = explorer_df.to_parquet(index=False)
+        c2.download_button("Export as Parquet", data=parquet_data, file_name="floatchat_argo_data.parquet", mime="application/octet-stream")
 
     elif page == "7. System / Data Sources":
         render_page_header(
@@ -766,8 +788,8 @@ def main():
         service_col1.metric("Demo catalog", "READY")
         service_col2.metric("NetCDF parser", "READY")
         service_col3.metric("AI planner", "LLM / FALLBACK")
-        service_col4.metric("Database", "NOT CONNECTED")
-        st.caption(f"Data mode: {os.getenv('DATA_MODE', 'demo').upper()} | Local vector store: READY ({len(rag.documents)} documents)")
+        service_col4.metric("Database", "CONNECTED" if source_label.startswith("REAL") else "DEMO FALLBACK")
+        st.caption(f"Data source: {source_label} | Local vector store: READY ({len(rag.documents)} documents)")
         st.markdown(
             """
             - **UI Framework:** Streamlit Glassmorphism Theme

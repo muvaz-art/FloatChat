@@ -1,6 +1,11 @@
 -- FloatChat PostgreSQL + PostGIS Schema Definition
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS vector;
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS vector;
+EXCEPTION
+    WHEN undefined_file THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS floats (
     float_id INT PRIMARY KEY,

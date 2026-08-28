@@ -5,14 +5,13 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-from app.query_engine import QueryEngine
-from ingestion.demo_data import generate_demo_argo_data
+from app.services import build_query_service
 
 mcp = FastMCP("FloatChat-MCP-Server")
 
 
-def _engine() -> QueryEngine:
-    return QueryEngine(*generate_demo_argo_data(num_floats=80, profiles_per_float=3))
+def _engine():
+    return build_query_service()[0]
 
 
 def _json_result(floats, measurements) -> str:

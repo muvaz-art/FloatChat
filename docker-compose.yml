@@ -1,0 +1,36 @@
+services:
+  app:
+    build: .
+    container_name: floatchat-app
+    restart: unless-stopped
+    environment:
+      DATA_MODE: demo
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: floatchat_db
+      POSTGRES_USER: floatchat_user
+      POSTGRES_PASSWORD: floatchat_pass
+      VECTOR_STORE_PATH: /app/data/vector_store.json
+    ports:
+      - "8501:8501"
+    depends_on:
+      - postgres
+    volumes:
+      - floatchat_app_data:/app/data
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: floatchat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: floatchat_db
+      POSTGRES_USER: floatchat_user
+      POSTGRES_PASSWORD: floatchat_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - floatchat_pgdata:/var/lib/postgresql/data
+
+volumes:
+  floatchat_pgdata:
+  floatchat_app_data:

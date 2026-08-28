@@ -21,6 +21,11 @@ VARIABLE_ALIASES = {
     "bbp700": ["BBP700", "BBP_700", "BACKSCATTER"],
     "nitrate": ["NITRATE", "NO3"],
     "ph": ["PH", "pH", "PH_IN_SITU_TOTAL"],
+    "pres_qc": ["PRES_QC"],
+    "temp_qc": ["TEMP_QC"],
+    "psal_qc": ["PSAL_QC"],
+    "doxy_qc": ["DOXY_QC"],
+    "chla_qc": ["CHLA_QC"],
 }
 
 
@@ -72,6 +77,8 @@ def parse_netcdf_file(uploaded_file) -> tuple[pd.DataFrame, dict]:
             })
             for key in ("temperature", "salinity", "oxygen", "chlorophyll", "bbp700", "nitrate", "ph"):
                 frame[key] = pd.to_numeric(_values(ds, found[key], size), errors="coerce")
+            for key in ("pres_qc", "temp_qc", "psal_qc", "doxy_qc", "chla_qc"):
+                frame[key] = _values(ds, found[key], size, default="")
             frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce", origin="1950-01-01", unit="D")
             frame.loc[~frame["latitude"].between(-90, 90), "latitude"] = np.nan
             frame.loc[~frame["longitude"].between(-180, 180), "longitude"] = np.nan

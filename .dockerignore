@@ -1,0 +1,9 @@
+.venv
+.git
+__pycache__
+.pytest_cache
+.env
+*.nc
+data/*.parquet
+data/vector_store.json
+data/vector_store.faiss

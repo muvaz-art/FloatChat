@@ -50,6 +50,7 @@ The default app uses synthetic ARGO-like data and labels the UI as demo mode. It
 - `database/init.sql` - PostGIS-ready schema and indexes.
 - `ingestion/netcdf_ingest.py` - common ARGO NetCDF normalization.
 - `ingestion/parquet.py` - optional Parquet read/write helpers.
+- `scripts/ingest_argo.py` - command-line NetCDF-to-PostgreSQL/PostGIS ingestion.
 - `rag/` - documents, local vector store, retrieval, and RAG pipeline.
 - `mcp_server/server.py` - controlled read-only MCP tools.
 - `tests/` - parser, execution, SQL-safety, and RAG tests.
@@ -86,6 +87,65 @@ POSTGRES_PASSWORD=
 ```
 
 Demo mode works without PostgreSQL or an OpenAI key. Run `database/init.sql` in a PostgreSQL database with PostGIS enabled before using the database executor.
+
+## Real ARGO Ingestion
+
+Place one `.nc` file or a directory of `.nc` files outside Git, configure the PostgreSQL values in `.env`, initialize the schema, and run:
+
+```powershell
+psql -U floatchat_user -d floatchat_db -f database/init.sql
+.\.venv\Scripts\python.exe scripts\ingest_argo.py path\to\argo-files
+```
+
+The command reports each file, warnings, float/profile/measurement totals, and failures. Missing optional BGC variables are preserved as empty columns rather than fabricated. Common ARGO QC fields are retained when present.
+
+## Database Mode
+
+Set `DATA_MODE=postgres` to make the Streamlit runtime attempt PostgreSQL/PostGIS. If the connection or tables are unavailable, the dashboard reports the error and uses the demo fallback rather than crashing. Set `DATA_MODE=demo` to force offline reproducible data.
+
+## Remote ARGO Mode
+
+FloatChat can load a remote ERDDAP CSV endpoint through the same normalized data model. Set `DATA_MODE=erddap` and provide `ERDDAP_URL` in `.env`. The endpoint must include float/platform ID, timestamp, latitude, longitude, depth or pressure, and at least one measured variable. Missing optional BGC fields remain absent; they are never fabricated.
+
+### Fast local PostGIS setup
+
+With Docker Desktop installed:
+
+```powershell
+docker compose up -d postgres
+Copy-Item .env.example .env
+# Keep the default POSTGRES_* values for the included container.
+.\.venv\Scripts\python.exe scripts\init_database.py
+.\.venv\Scripts\python.exe scripts\ingest_argo.py path\to\argo-files
+```
+
+Then set `DATA_MODE=postgres` in `.env` and restart Streamlit. Check the System / Data Sources page for connection and dataset status. Stop the database with `docker compose down`; keep the volume with `docker compose down` or remove it with `docker compose down -v`.
+
+## Container Deployment
+
+For a repeatable container deployment:
+
+```powershell
+docker compose up --build
+```
+
+Open `http://localhost:8501`. The compose app starts in demo mode and includes PostGIS for later database-mode use. The Streamlit health endpoint is `http://localhost:8501/_stcore/health`.
+
+Run the local health check with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\healthcheck.py
+```
+
+## RAG and MCP
+
+The local RAG pipeline persists documentation embeddings in `data/vector_store.json`; it stores schema and oceanographic documents, not raw measurement rows. When the optional `faiss-cpu` package is available, it uses a persisted FAISS inner-product index at `data/vector_store.faiss`; otherwise it uses the same stable local embeddings with a NumPy search fallback. MCP tools use the shared service factory and expose validated read-only operations. PostgreSQL-backed MCP execution follows the configured `DATA_MODE`; demo mode remains available offline.
+
+Install FAISS where a compatible wheel is available:
+
+```powershell
+pip install faiss-cpu
+```
 
 ## Example Questions
 
