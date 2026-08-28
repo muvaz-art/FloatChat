@@ -7,3 +7,4 @@ __pycache__/
 *.nc
 data/vector_store.json
 data/*.parquet
+data/*.faiss
