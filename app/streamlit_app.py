@@ -279,16 +279,28 @@ def render_chat_page(engine: QueryEngine, floats_df: pd.DataFrame, meas_df: pd.D
     natural_tab, builder_tab, guide_tab = st.tabs(["Ask naturally", "Guided query builder", "How answers work"])
 
     with natural_tab:
-        st.caption("Examples: nearest active floats to 15, 72 | salinity profiles in the Arabian Sea | oxygen deeper than 500m")
+        sample_questions = [
+            "Show salinity profiles near the equator in March 2023",
+            "Compare BGC parameters in the Arabian Sea for the last 6 months",
+            "What are the nearest ARGO floats to 15 N, 72 E?",
+            "Show oxygen profiles deeper than 500m",
+            "Show temperature profiles in the Bay of Bengal",
+            "Find active floats near 15, 75",
+        ]
+        st.caption("Choose a working example or write your own question.")
         st.session_state.setdefault("chat_history", [])
         st.session_state.setdefault("saved_queries", [])
         with st.form("natural_query_form", clear_on_submit=False):
+            sample = st.selectbox("Sample questions", ["Write my own"] + sample_questions)
             query_input = st.text_input(
                 "Your ocean question",
                 placeholder="e.g. Show temperature profiles near the equator",
                 key="natural_query",
             )
             submitted = st.form_submit_button("Analyze question", type="primary")
+        if sample != "Write my own":
+            query_input = sample
+            st.info(f"Selected example: {sample}", icon="💬")
         if submitted and query_input.strip():
             st.session_state.chat_history.append(query_input.strip())
         save_col, saved_col = st.columns([1, 2])
@@ -309,16 +321,19 @@ def render_chat_page(engine: QueryEngine, floats_df: pd.DataFrame, meas_df: pd.D
                 st.session_state.chat_history = []
                 st.rerun()
         if submitted and query_input.strip():
-            plan = engine.parse_query_plan(query_input)
-            previous_context = st.session_state.chat_history[-2] if len(st.session_state.chat_history) > 1 else None
-            st.markdown(f"**Interpreted as:** `{plan['intent']}` | `{plan['parameter']}` | `{plan['visualization']}`")
-            if previous_context:
-                st.caption(f"Context available from your previous question: {previous_context}")
-            context = rag.retrieve_context(query_input)
-            with st.expander("Retrieved ocean and schema context"):
-                for item in context:
-                    st.markdown(f"- **{item['id']}** ({item['score']:.2f}): {item['text']}")
-            render_query_results(engine, plan, meas_df)
+            try:
+                plan = engine.parse_query_plan(query_input)
+                previous_context = st.session_state.chat_history[-2] if len(st.session_state.chat_history) > 1 else None
+                st.markdown(f"**Interpreted as:** `{plan['intent']}` | `{plan['parameter']}` | `{plan['visualization']}`")
+                if previous_context:
+                    st.caption(f"Context available from your previous question: {previous_context}")
+                context = rag.retrieve_context(query_input)
+                with st.expander("Retrieved ocean and schema context"):
+                    for item in context:
+                        st.markdown(f"- **{item['id']}** ({item['score']:.2f}): {item['text']}")
+                render_query_results(engine, plan, meas_df)
+            except (ValueError, KeyError) as exc:
+                st.error(f"FloatChat could not understand that question safely: {exc}. Try one of the sample questions above.")
 
     with builder_tab:
         st.markdown("#### Build a query without knowing the vocabulary")

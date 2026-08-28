@@ -144,8 +144,9 @@ class QueryEngine:
         elif "nearest" in q or "near" in q:
             if plan["target_lat"] is None and "india" in q:
                 plan["target_lat"], plan["target_lon"] = 15.0, 75.0
-            plan["intent"] = "nearest_floats"
-            plan["visualization"] = "map"
+            if plan["target_lat"] is not None and plan["target_lon"] is not None:
+                plan["intent"] = "nearest_floats"
+                plan["visualization"] = "map"
             
         if "active" in q: plan["status"] = "ACTIVE"
         
