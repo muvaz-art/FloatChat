@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import os
+from dotenv import load_dotenv
 
 from ingestion.demo_data import generate_demo_argo_data
 from ingestion.netcdf_ingest import parse_netcdf_file
@@ -8,8 +10,11 @@ from app.visualization import (
     render_profile_chart,
     render_multi_profile_chart,
     render_trajectory_map,
+    render_depth_time_plot,
 )
 from app.query_engine import QueryEngine
+from rag.pipeline import RAGPipeline
+from rag.vector_store import LocalVectorStore
 
 
 st.set_page_config(
@@ -249,7 +254,7 @@ def render_region_table(floats_df: pd.DataFrame):
     )
 
 
-def render_chat_page(engine: QueryEngine, floats_df: pd.DataFrame, meas_df: pd.DataFrame):
+def render_chat_page(engine: QueryEngine, floats_df: pd.DataFrame, meas_df: pd.DataFrame, rag: RAGPipeline):
     render_page_header(
         "AI Ocean Intelligence Chat",
         "Ask questions in plain English or build a precise ARGO search step by step.",
@@ -293,6 +298,10 @@ def render_chat_page(engine: QueryEngine, floats_df: pd.DataFrame, meas_df: pd.D
             st.markdown(f"**Interpreted as:** `{plan['intent']}` | `{plan['parameter']}` | `{plan['visualization']}`")
             if previous_context:
                 st.caption(f"Context available from your previous question: {previous_context}")
+            context = rag.retrieve_context(query_input)
+            with st.expander("Retrieved ocean and schema context"):
+                for item in context:
+                    st.markdown(f"- **{item['id']}** ({item['score']:.2f}): {item['text']}")
             render_query_results(engine, plan, meas_df)
 
     with builder_tab:
@@ -336,6 +345,16 @@ def render_query_results(engine: QueryEngine, plan: dict, meas_df: pd.DataFrame)
                 st.warning("No measurements matched. Try a broader region or a shallower depth.")
             else:
                 st.plotly_chart(render_profile_chart(filt_meas, plan.get("parameter", "temperature")), width="stretch")
+        elif plan.get("visualization") == "comparison":
+            if filt_meas.empty:
+                st.warning("No observations matched the comparison request.")
+            else:
+                st.plotly_chart(render_multi_profile_chart(filt_meas, plan.get("parameter", "temperature")), width="stretch")
+        elif plan.get("visualization") == "depth_time":
+            if filt_meas.empty:
+                st.warning("No observations matched the depth-time request.")
+            else:
+                st.plotly_chart(render_depth_time_plot(filt_meas, plan.get("parameter", "temperature")), width="stretch")
         elif filt_floats.empty:
             st.warning("No floats matched. Try a broader location or another status.")
         else:
@@ -461,9 +480,11 @@ def render_demo_page(floats_df: pd.DataFrame, meas_df: pd.DataFrame):
 
 
 def main():
+    load_dotenv()
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
     floats_df, profiles_df, meas_df = load_initial_data()
     engine = QueryEngine(floats_df, profiles_df, meas_df)
+    rag = RAGPipeline(LocalVectorStore(os.getenv("VECTOR_STORE_PATH", "data/vector_store.json")))
     summary = build_summary(floats_df, profiles_df, meas_df)
 
     with st.sidebar:
@@ -498,7 +519,7 @@ def main():
         )
 
     if page == "2. AI Ocean Chat":
-        render_chat_page(engine, floats_df, meas_df)
+        render_chat_page(engine, floats_df, meas_df, rag)
         return
 
     if page == "8. FloatChat Field Guide":
@@ -672,9 +693,10 @@ def main():
             "Comparative hydrographic analysis across parameters and floats.",
             "PROFILE LAB",
         )
-        lab_col1, lab_col2 = st.columns(2)
+        lab_col1, lab_col2, lab_col3 = st.columns(3)
         param = lab_col1.selectbox("Select BGC / Hydrographic Parameter", ["temperature", "salinity", "oxygen", "chlorophyll"])
         lab_regions = lab_col2.multiselect("Compare regions", sorted(floats_df["region"].unique().tolist()), default=[])
+        lab_view = lab_col3.selectbox("View", ["Profile comparison", "Depth-time heatmap"])
         lab_measurements = meas_df
         if lab_regions:
             region_float_ids = floats_df[floats_df["region"].isin(lab_regions)]["float_id"]
@@ -683,7 +705,10 @@ def main():
         if lab_measurements.empty:
             st.warning("No observations match the selected regions.")
         else:
-            st.plotly_chart(render_multi_profile_chart(lab_measurements, param), width="stretch")
+            if lab_view == "Depth-time heatmap":
+                st.plotly_chart(render_depth_time_plot(lab_measurements, param), width="stretch")
+            else:
+                st.plotly_chart(render_multi_profile_chart(lab_measurements, param), width="stretch")
 
     elif page == "6. Data Explorer":
         render_page_header(
@@ -740,16 +765,16 @@ def main():
         service_col1, service_col2, service_col3, service_col4 = st.columns(4)
         service_col1.metric("Demo catalog", "READY")
         service_col2.metric("NetCDF parser", "READY")
-        service_col3.metric("AI planner", "OFFLINE FALLBACK")
+        service_col3.metric("AI planner", "LLM / FALLBACK")
         service_col4.metric("Database", "NOT CONNECTED")
-        st.caption("The status panel distinguishes working local services from optional production integrations.")
+        st.caption(f"Data mode: {os.getenv('DATA_MODE', 'demo').upper()} | Local vector store: READY ({len(rag.documents)} documents)")
         st.markdown(
             """
             - **UI Framework:** Streamlit Glassmorphism Theme
             - **Visualization:** Plotly Scientific Engine
             - **Database Engine:** PostgreSQL + PostGIS (Fallback: Memory Pandas)
-            - **Vector Engine:** pgvector RAG Planner
-            - **MCP Protocol:** Active Python MCP SDK Server
+            - **Vector Engine:** Persistent local semantic store (FAISS/Chroma-ready boundary)
+            - **MCP Protocol:** Controlled read-only Python MCP SDK tools
             """
         )
 

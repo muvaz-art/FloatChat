@@ -7,6 +7,7 @@ Base = declarative_base()
 class FloatModel(Base):
     __tablename__ = "floats"
     float_id = Column(Integer, primary_key=True)
+    platform_number = Column(String(32))
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     status = Column(String(20), nullable=False)

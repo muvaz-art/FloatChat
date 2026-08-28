@@ -1,4 +1,6 @@
-# RAG Embeddings Scaffolding
+from rag.vector_store import LocalVectorStore
+
+
 def generate_metadata_embedding(text: str):
-    """Generates vector embeddings for oceanographic terms."""
-    return [0.0] * 1536
+    """Generate a deterministic local embedding compatible with the vector store."""
+    return LocalVectorStore()._embed(text).tolist()

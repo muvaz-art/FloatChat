@@ -3,6 +3,8 @@ import os
 import json
 import numpy as np
 import pandas as pd
+from datetime import date, timedelta
+from app.query_plan import QueryPlan
 
 class QueryEngine:
     """
@@ -57,24 +59,33 @@ class QueryEngine:
         q = query.lower()
         plan = {
             "intent": "general_search",
-            "parameter": "temperature",
+            "variables": ["temperature"],
             "latitude_min": None,
             "latitude_max": None,
             "longitude_min": None,
             "longitude_max": None,
             "target_lat": None,
             "target_lon": None,
+            "target_latitude": None,
+            "target_longitude": None,
+            "radius_km": None,
             "min_depth": None,
+            "max_depth": None,
+            "start_date": None,
+            "end_date": None,
+            "relative_months": None,
+            "float_ids": [],
             "region": None,
             "status": None,
             "visualization": "map"
         }
         
         # Parameter
-        if "salinity" in q: plan["parameter"] = "salinity"
-        elif "oxygen" in q: plan["parameter"] = "oxygen"
-        elif "chlorophyll" in q or "bgc" in q: plan["parameter"] = "chlorophyll"
-        elif "temperature" in q: plan["parameter"] = "temperature"
+        variables = [name for name in ("temperature", "salinity", "oxygen", "chlorophyll", "nitrate", "ph") if name in q]
+        if variables:
+            plan["variables"] = variables
+        elif "bgc" in q:
+            plan["variables"] = ["oxygen", "chlorophyll"]
         
         # Region
         if "arabian sea" in q:
@@ -97,15 +108,37 @@ class QueryEngine:
         depth_m = re.search(r'(deeper than|depth >|>)\s*(\d+)', q)
         if depth_m:
             plan["min_depth"] = float(depth_m.group(2))
+
+        month_m = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})", q)
+        if month_m:
+            month = __import__("datetime").datetime.strptime(month_m.group(1), "%B").month
+            year = int(month_m.group(2))
+            plan["start_date"] = date(year, month, 1).isoformat()
+            plan["end_date"] = (date(year + (month == 12), 1 if month == 12 else month + 1, 1)).isoformat()
+        elif "last 6 months" in q:
+            plan["relative_months"] = 6
             
         # Nearest Coordinates
-        coord_m = re.search(r'(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)', q)
+        coord_m = re.search(r'(-?\d+\.?\d*)\s*([ns])?\s*,\s*(-?\d+\.?\d*)\s*([ew])?', q)
         if coord_m:
             plan["intent"] = "nearest_floats"
-            plan["target_lat"] = float(coord_m.group(1))
-            plan["target_lon"] = float(coord_m.group(2))
+            latitude = float(coord_m.group(1))
+            longitude = float(coord_m.group(3))
+            if coord_m.group(2) == "s":
+                latitude = -abs(latitude)
+            if coord_m.group(4) == "w":
+                longitude = -abs(longitude)
+            plan["target_lat"] = latitude
+            plan["target_lon"] = longitude
+            plan["target_latitude"] = plan["target_lat"]
+            plan["target_longitude"] = plan["target_lon"]
             
-        if "profile" in q or "deeper" in q:
+        if "compare" in q:
+            plan["intent"] = "region_compare"
+            plan["visualization"] = "comparison"
+        elif "depth-time" in q or "depth time" in q or "heatmap" in q:
+            plan["visualization"] = "depth_time"
+        elif "profile" in q or "deeper" in q:
             plan["intent"] = "profile_query"
             plan["visualization"] = "depth_profile"
         elif "nearest" in q or "near" in q:
@@ -116,39 +149,54 @@ class QueryEngine:
             
         if "active" in q: plan["status"] = "ACTIVE"
         
-        return plan
+        plan["parameter"] = plan["variables"][0]
+        validated = QueryPlan.model_validate(plan)
+        result = validated.model_dump(mode="json")
+        result["parameter"] = result["variables"][0]
+        return result
 
     def execute_plan(self, plan: dict):
         """Executes structured query plan on current dataset."""
+        plan = QueryPlan.model_validate(plan)
         df = self.meas_df.copy()
         floats = self.floats_df.copy()
         
         # Spatial filtering
-        if plan.get("latitude_min") is not None:
-            df = df[df["latitude"] >= plan["latitude_min"]]
-            floats = floats[floats["latitude"] >= plan["latitude_min"]]
-        if plan.get("latitude_max") is not None:
-            df = df[df["latitude"] <= plan["latitude_max"]]
-            floats = floats[floats["latitude"] <= plan["latitude_max"]]
-        if plan.get("longitude_min") is not None:
-            df = df[df["longitude"] >= plan["longitude_min"]]
-            floats = floats[floats["longitude"] >= plan["longitude_min"]]
-        if plan.get("longitude_max") is not None:
-            df = df[df["longitude"] <= plan["longitude_max"]]
-            floats = floats[floats["longitude"] <= plan["longitude_max"]]
+        if plan.latitude_min is not None:
+            df = df[df["latitude"] >= plan.latitude_min]
+            floats = floats[floats["latitude"] >= plan.latitude_min]
+        if plan.latitude_max is not None:
+            df = df[df["latitude"] <= plan.latitude_max]
+            floats = floats[floats["latitude"] <= plan.latitude_max]
+        if plan.longitude_min is not None:
+            df = df[df["longitude"] >= plan.longitude_min]
+            floats = floats[floats["longitude"] >= plan.longitude_min]
+        if plan.longitude_max is not None:
+            df = df[df["longitude"] <= plan.longitude_max]
+            floats = floats[floats["longitude"] <= plan.longitude_max]
             
         # Depth filtering
-        if plan.get("min_depth") is not None:
-            df = df[df["depth"] >= plan["min_depth"]]
+        if plan.min_depth is not None:
+            df = df[df["depth"] >= plan.min_depth]
+        if plan.max_depth is not None:
+            df = df[df["depth"] <= plan.max_depth]
+
+        if plan.start_date is not None:
+            df = df[pd.to_datetime(df["timestamp"]) >= pd.Timestamp(plan.start_date)]
+        if plan.end_date is not None:
+            df = df[pd.to_datetime(df["timestamp"]) < pd.Timestamp(plan.end_date)]
+        if plan.relative_months is not None and not df.empty:
+            reference = pd.to_datetime(df["timestamp"]).max()
+            df = df[pd.to_datetime(df["timestamp"]) >= reference - pd.Timedelta(days=30 * plan.relative_months)]
             
         # Status filtering
-        if plan.get("status"):
-            floats = floats[floats["status"] == plan["status"]]
+        if plan.status:
+            floats = floats[floats["status"] == plan.status]
             df = df[df["float_id"].isin(floats["float_id"])]
             
         # Nearest floats calculation (Haversine Distance)
-        if plan.get("intent") == "nearest_floats" and plan.get("target_lat") is not None:
-            t_lat, t_lon = plan["target_lat"], plan["target_lon"]
+        if plan.intent == "nearest_floats" and plan.target_latitude is not None:
+            t_lat, t_lon = plan.target_latitude, plan.target_longitude
             
             def haversine(lat1, lon1, lat2, lon2):
                 R = 6371.0 # Earth radius km
@@ -160,4 +208,4 @@ class QueryEngine:
             floats = floats.sort_values("distance_km").head(10)
             df = df[df["float_id"].isin(floats["float_id"])]
             
-        return floats, df
+        return floats, df.head(plan.limit)

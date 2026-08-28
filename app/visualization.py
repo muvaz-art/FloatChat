@@ -126,3 +126,17 @@ def render_trajectory_map(profiles_df: pd.DataFrame, float_id: int):
     )
     fig.update_layout(**DARK_THEME, height=450)
     return fig
+
+
+def render_depth_time_plot(meas_df: pd.DataFrame, parameter="temperature"):
+    """Render a time/depth heatmap for an available measurement variable."""
+    if meas_df.empty or parameter not in meas_df.columns:
+        return go.Figure(layout={"title": "No observations available for this variable"})
+    frame = meas_df.dropna(subset=["timestamp", "depth", parameter]).copy()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
+    frame = frame.dropna(subset=["timestamp"])
+    pivot = frame.pivot_table(index="depth", columns="timestamp", values=parameter, aggfunc="mean")
+    fig = go.Figure(go.Heatmap(x=pivot.columns, y=pivot.index, z=pivot.values, colorscale="Viridis", colorbar_title=parameter))
+    fig.update_layout(**DARK_THEME, title=f"<b>DEPTH-TIME: {parameter.upper()}</b>", xaxis_title="Observation time", yaxis_title="Depth (meters)", height=500)
+    fig.update_yaxes(autorange="reversed")
+    return fig
