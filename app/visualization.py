@@ -49,6 +49,48 @@ def render_global_map(floats_df: pd.DataFrame, selected_float_id=None, color_by=
     fig.update_layout(**DARK_THEME, margin=dict(l=10, r=10, t=40, b=10), height=520)
     return fig
 
+
+def render_3d_float_map(floats_df: pd.DataFrame, color_by="status"):
+    """Render a futuristic 3D view of float positions and depth capability."""
+    if floats_df.empty:
+        return go.Figure(layout={"title": "No floats available for this view"})
+    color_column = color_by if color_by in floats_df.columns else "status"
+    marker = {"size": 7, "opacity": 0.9}
+    if color_column == "status":
+        marker["color"] = floats_df[color_column].map({"ACTIVE": "#00F2FE", "INACTIVE": "#FF4B4B"})
+    else:
+        marker["color"] = floats_df[color_column]
+        marker["colorscale"] = "Turbo"
+        marker["colorbar"] = {"title": color_column}
+    fig = go.Figure(go.Scatter3d(
+        x=floats_df["longitude"],
+        y=floats_df["latitude"],
+        z=-floats_df["max_depth"],
+        mode="markers",
+        text=floats_df["float_id"].astype(str),
+        customdata=floats_df[["region", "status", "max_depth"]],
+        hovertemplate="Float %{text}<br>Lon %{x:.2f}<br>Lat %{y:.2f}<br>Capability %{customdata[2]:.0f} m<extra></extra>",
+        marker=marker,
+        name="ARGO floats",
+    ))
+    fig.update_layout(
+        **DARK_THEME,
+        title="<b>3D OCEAN OBSERVATION VOLUME</b>",
+        scene={
+            "xaxis_title": "Longitude",
+            "yaxis_title": "Latitude",
+            "zaxis_title": "Depth capability (m)",
+            "zaxis": {"autorange": "reversed", "gridcolor": "rgba(0, 242, 254, 0.14)"},
+            "xaxis": {"gridcolor": "rgba(0, 242, 254, 0.14)"},
+            "yaxis": {"gridcolor": "rgba(0, 242, 254, 0.14)"},
+            "camera": {"eye": {"x": 1.55, "y": 1.45, "z": 1.15}},
+            "bgcolor": "rgba(3, 11, 30, 0.7)",
+        },
+        height=560,
+        margin=dict(l=0, r=0, t=45, b=0),
+    )
+    return fig
+
 def render_profile_chart(meas_df: pd.DataFrame, parameter="temperature"):
     """Plots depth profile curve (Parameter vs Depth)."""
     fig = go.Figure()
@@ -125,6 +167,22 @@ def render_trajectory_map(profiles_df: pd.DataFrame, float_id: int):
         showcountries=True, countrycolor="rgba(0, 242, 254, 0.2)"
     )
     fig.update_layout(**DARK_THEME, height=450)
+    return fig
+
+
+def render_trajectory_network(profiles_df: pd.DataFrame, float_ids) -> go.Figure:
+    """Render recent trajectories for a filtered group of floats."""
+    selected = profiles_df[profiles_df["float_id"].isin(list(float_ids))].copy()
+    fig = go.Figure()
+    for float_id, track in selected.groupby("float_id"):
+        track = track.sort_values("timestamp")
+        fig.add_trace(go.Scattergeo(
+            lat=track["latitude"], lon=track["longitude"], mode="lines+markers",
+            name=f"Float {float_id}", marker={"size": 5}, line={"width": 2},
+            hovertemplate=f"Float {float_id}<br>Lat %{{lat:.2f}}<br>Lon %{{lon:.2f}}<extra></extra>",
+        ))
+    fig.update_geos(showocean=True, oceancolor="#020C1B", showland=True, landcolor="#0A192F", showcountries=True, countrycolor="rgba(0, 242, 254, 0.2)")
+    fig.update_layout(**DARK_THEME, title="<b>ARGO TRAJECTORY NETWORK</b>", height=560, margin=dict(l=10, r=10, t=45, b=10), legend={"orientation": "h"})
     return fig
 
 

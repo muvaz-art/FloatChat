@@ -11,6 +11,8 @@ from app.visualization import (
     render_multi_profile_chart,
     render_trajectory_map,
     render_depth_time_plot,
+    render_3d_float_map,
+    render_trajectory_network,
 )
 from app.query_engine import QueryEngine
 from rag.pipeline import RAGPipeline
@@ -654,6 +656,7 @@ def main():
         status_filter = f_col2.selectbox("Status", ["ALL", "ACTIVE", "INACTIVE"])
         max_d = f_col3.slider("Min Depth Capability (m)", 0, 2000, 1000)
         map_parameter = f_col4.selectbox("Color markers by", ["Fleet status", "temperature", "salinity", "oxygen", "chlorophyll"])
+        map_view = st.radio("Map interface", ["2D globe", "3D ocean volume", "Trajectory network"], horizontal=True)
         observation_dates = pd.to_datetime(floats_df["last_observation"])
         date_range = st.slider(
             "Last observation window",
@@ -680,7 +683,13 @@ def main():
             st.warning("No floats match the current filters. Lower the depth requirement or broaden the region.")
         else:
             color_by = "status" if map_parameter == "Fleet status" else map_parameter
-            st.plotly_chart(render_global_map(sub_floats, color_by=color_by), width="stretch", config={"displayModeBar": False})
+            if map_view == "2D globe":
+                figure = render_global_map(sub_floats, color_by=color_by)
+            elif map_view == "3D ocean volume":
+                figure = render_3d_float_map(sub_floats, color_by=color_by)
+            else:
+                figure = render_trajectory_network(profiles_df, sub_floats["float_id"])
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
 
     elif page == "4. Float Explorer":
         render_page_header(
@@ -789,7 +798,7 @@ def main():
         service_col2.metric("NetCDF parser", "READY")
         service_col3.metric("AI planner", "LLM / FALLBACK")
         service_col4.metric("Database", "CONNECTED" if source_label.startswith("REAL") else "DEMO FALLBACK")
-        st.caption(f"Data source: {source_label} | Local vector store: READY ({len(rag.documents)} documents)")
+        st.caption(f"Data source: {source_label} | Local vector store: READY ({len(rag.store.documents)} documents)")
         st.markdown(
             """
             - **UI Framework:** Streamlit Glassmorphism Theme
