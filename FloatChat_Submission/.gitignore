@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+.DS_Store
+*.nc
+data/vector_store.json
+data/*.parquet
+data/*.faiss
